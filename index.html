@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Snake — Single File Game</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#10b981;--muted:#94a3b8;--danger:#ef4444}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial}
+    body{display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#071224 0%, #081827 100%);color:#e6eef6}
+    .wrap{width:min(900px,96vw);display:grid;grid-template-columns:1fr 300px;gap:20px;padding:20px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:12px;padding:18px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
+    .game{display:flex;flex-direction:column;align-items:center;gap:12px}
+    canvas{background:linear-gradient(180deg,#0b1220,#061021);border-radius:8px;border:4px solid rgba(255,255,255,0.03);width:100%;height:auto;max-width:700px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--accent);padding:8px 12px;border-radius:8px;cursor:pointer}
+    button.secondary{color:var(--muted);border-style:dashed}
+    .sidebar{width:100%;display:flex;flex-direction:column;gap:12px}
+    h1{margin:0;font-size:18px}
+    p{margin:0;color:var(--muted);font-size:13px}
+    .stat{display:flex;justify-content:space-between;padding:10px;background:rgba(255,255,255,0.01);border-radius:8px}
+    .big{font-size:20px;color:#fff}
+    .footer{font-size:12px;color:var(--muted);text-align:center;margin-top:6px}
+    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+    .touch-ctrls{display:none;gap:6px}
+    @media(max-width:760px){
+      .wrap{grid-template-columns:1fr;}
+      .touch-ctrls{display:flex}
+      canvas{max-width:100%}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card game">
+      <h1>Snake — Single-file Static Game</h1>
+      <p>Play with arrow keys / WASD. On mobile use the touch controls below.</p>
+      <canvas id="board" width="600" height="600" aria-label="Snake game board"></canvas>
+
+      <div class="controls">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn" class="secondary">Pause</button>
+        <button id="resetBtn" class="secondary">Reset</button>
+        <label style="margin-left:8px;color:var(--muted);display:flex;align-items:center;gap:8px"><span style="font-size:13px">Speed</span>
+          <input id="speedRange" type="range" min="4" max="14" value="8" style="accent-color:var(--accent)">
+        </label>
+      </div>
+
+      <div class="touch-ctrls" id="touchCtrls">
+        <button data-dir="up">▲</button>
+        <div style="display:flex;gap:6px;justify-content:center;width:100%">
+          <button data-dir="left">◀</button>
+          <button data-dir="down">▼</button>
+          <button data-dir="right">▶</button>
+        </div>
+      </div>
+
+      <div class="footer">Tip: Press Space to pause/resume. Try to collect apples to grow your score!</div>
+    </div>
+
+    <div class="card sidebar">
+      <div class="stat"><div>Score</div><div id="score" class="big">0</div></div>
+      <div class="stat"><div>Best</div><div id="best" class="big">0</div></div>
+      <div class="stat"><div>Length</div><div id="len" class="big">1</div></div>
+      <div class="stat"><div>Speed</div><div id="spd" class="big">8</div></div>
+
+      <div style="padding:8px;background:rgba(255,255,255,0.01);border-radius:8px">
+        <strong>How to play</strong>
+        <ul style="margin:8px 0 0 18px;color:var(--muted);font-size:13px">
+          <li>Arrow keys / WASD to move</li>
+          <li>Eat apples to grow</li>
+          <li>Don’t hit walls or yourself</li>
+          <li>Use speed slider to adjust difficulty</li>
+        </ul>
+      </div>
+
+      <div style="padding:8px;color:var(--muted);font-size:13px">
+        Built for students — single HTML file. Open locally or host on GitHub Pages.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Canvas snake game (single-file)
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const size = 20; // grid size in pixels
+    const cols = canvas.width / size;
+    const rows = canvas.height / size;
+
+    let snake = [{x: Math.floor(cols/2), y: Math.floor(rows/2)}];
+    let dir = {x: 0, y: 0};
+    let apple = {};
+    let score = 0;
+    let best = Number(localStorage.getItem('snake_best')||0);
+    let running = false;
+    let timer = null;
+    const scoreEl = document.getElementById('score');
+    const bestEl = document.getElementById('best');
+    const lenEl = document.getElementById('len');
+    const spdEl = document.getElementById('spd');
+    const speedRange = document.getElementById('speedRange');
+
+    bestEl.textContent = best;
+
+    function resetGame(){
+      snake = [{x: Math.floor(cols/2), y: Math.floor(rows/2)}];
+      dir = {x: 0, y: 0};
+      placeApple();
+      score = 0;
+      updateStats();
+      stop();
+    }
+
+    function start(){
+      if(running) return;
+      running = true;
+      const fps = Number(speedRange.value);
+      spdEl.textContent = fps;
+      timer = setInterval(tick, 1000 / fps);
+    }
+
+    function stop(){
+      running = false;
+      clearInterval(timer);
+      timer = null;
+    }
+
+    function pauseToggle(){
+      if(running) stop(); else start();
+    }
+
+    function placeApple(){
+      let x,y,collision;
+      do{
+        x = Math.floor(Math.random()*cols);
+        y = Math.floor(Math.random()*rows);
+        collision = snake.some(s=>s.x===x && s.y===y);
+      }while(collision);
+      apple = {x,y};
+    }
+
+    function tick(){
+      // move head
+      const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+      // wall collision
+      if(head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows){
+        gameOver(); return;
+      }
+      // self collision
+      if(snake.some(s=>s.x===head.x && s.y===head.y)){
+        gameOver(); return;
+      }
+      snake.unshift(head);
+      // apple
+      if(head.x === apple.x && head.y === apple.y){
+        score += 10;
+        placeApple();
+      } else {
+        snake.pop();
+      }
+      draw();
+      updateStats();
+    }
+
+    function gameOver(){
+      stop();
+      alert('Game Over — Score: ' + score);
+      if(score > best){
+        best = score; localStorage.setItem('snake_best', best);
+      }
+      resetGame();
+      draw();
+    }
+
+    function draw(){
+      // clear
+      ctx.fillStyle = '#071824';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      // grid (subtle)
+      ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+      ctx.lineWidth = 1;
+      for(let i=0;i<cols;i++){
+        ctx.beginPath();ctx.moveTo(i*size,0);ctx.lineTo(i*size,canvas.height);ctx.stroke();
+      }
+      for(let j=0;j<rows;j++){
+        ctx.beginPath();ctx.moveTo(0,j*size);ctx.lineTo(canvas.width,j*size);ctx.stroke();
+      }
+      // apple
+      drawRect(apple.x, apple.y, size, '#ef4444');
+      // snake
+      for(let i=0;i<snake.length;i++){
+        const s = snake[i];
+        const shade = i===0 ? '#10b981' : 'rgba(16,185,129,' + (0.6 - i*0.02) + ')';
+        drawRect(s.x, s.y, size-1, shade);
+      }
+    }
+
+    function drawRect(cx, cy, w, color){
+      ctx.fillStyle = color;
+      ctx.fillRect(cx*size + 1, cy*size + 1, w-2, w-2);
+    }
+
+    function updateStats(){
+      scoreEl.textContent = score;
+      bestEl.textContent = best;
+      lenEl.textContent = snake.length;
+    }
+
+    // controls
+    window.addEventListener('keydown', e=>{
+      const key = e.key;
+      if(key === ' '){ e.preventDefault(); pauseToggle(); return; }
+      let changed = false;
+      if((key==='ArrowUp' || key==='w' || key==='W') && dir.y!==1){ dir={x:0,y:-1}; changed=true }
+      if((key==='ArrowDown' || key==='s' || key==='S') && dir.y!==-1){ dir={x:0,y:1}; changed=true }
+      if((key==='ArrowLeft' || key==='a' || key==='A') && dir.x!==1){ dir={x:-1,y:0}; changed=true }
+      if((key==='ArrowRight' || key==='d' || key==='D') && dir.x!==-1){ dir={x:1,y:0}; changed=true }
+      if(changed && !running) start();
+    });
+
+    document.getElementById('startBtn').addEventListener('click', start);
+    document.getElementById('pauseBtn').addEventListener('click', pauseToggle);
+    document.getElementById('resetBtn').addEventListener('click', ()=>{ resetGame(); draw(); });
+    speedRange.addEventListener('input', ()=>{
+      const v = Number(speedRange.value);
+      spdEl.textContent = v;
+      if(running){ stop(); timer = setInterval(tick, 1000 / v); running = true; }
+    });
+
+    // touch controls
+    document.querySelectorAll('[data-dir]').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const d = b.dataset.dir;
+        if(d==='up' && dir.y!==1) dir={x:0,y:-1};
+        if(d==='down' && dir.y!==-1) dir={x:0,y:1};
+        if(d==='left' && dir.x!==1) dir={x:-1,y:0};
+        if(d==='right' && dir.x!==-1) dir={x:1,y:0};
+        if(!running) start();
+      });
+    });
+
+    // show touch controls on mobile
+    function checkMobile(){ if(window.innerWidth <= 760) document.getElementById('touchCtrls').style.display='flex'; }
+    window.addEventListener('resize', checkMobile);
+    checkMobile();
+
+    // initialize
+    placeApple(); draw(); updateStats();
+  </script>
+</body>
+</html>
